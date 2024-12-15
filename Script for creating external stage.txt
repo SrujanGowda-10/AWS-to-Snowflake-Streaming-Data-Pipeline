@@ -1,0 +1,27 @@
+-- File format
+CREATE FILE FORMAT format_for_csv
+    TYPE = 'CSV'
+    SKIP_HEADER = 1
+    FIELD_DELIMITER = ','
+    FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+;
+
+-- Storage Integration
+CREATE OR REPLACE STORAGE INTEGRATION aws_snowflake_integration
+    TYPE = EXTERNAL_STAGE
+    STORAGE_PROVIDER = 'S3'
+    STORAGE_AWS_ROLE_ARN = 'IAM Role arn'
+    ENABLED = TRUE
+    STORAGE_ALLOWED_LOCATIONS = ('s3://scd-etl-bucket')
+    COMMENT = 'stores a generated identity and access management (IAM) entity'
+;
+
+
+--- External Stage
+CREATE OR REPLACE STAGE s3_external_stage
+    STORAGE_INTEGRATION = aws_snowflake_integration
+    URL = 's3://scd-etl-bucket'
+    FILE_FORMAT = format_for_csv
+;
+
+
