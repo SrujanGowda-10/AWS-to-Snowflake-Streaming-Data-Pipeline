@@ -1,0 +1,105 @@
+
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+  
+sc = SparkContext.getOrCreate()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+from awsglue.dynamicframe import DynamicFrame
+from datetime import datetime
+from pyspark.sql.functions import col
+import boto3
+dyf = glueContext.create_dynamic_frame.from_options(
+    connection_type="s3",
+    connection_options = {
+        "path":["s3://scd-etl-bucket/raw_data/"]
+    },
+    format = "json"    
+)
+schema = StructType([
+    StructField("id", IntegerType(), True),
+    StructField("first_name", StringType(), True),
+    StructField("last_name", StringType(), True),
+    StructField("street_name", StringType(), True),
+    StructField("city", StringType(), True),
+    StructField("state", StringType(), True),
+    StructField("zip_code", StringType(), True),
+    StructField("country", StringType(), True),
+    StructField("job", StringType(), True),
+    StructField("email", StringType(), True),
+    StructField("phone_number", StringType(), True),
+])
+df = spark.read.schema(schema).json("s3://scd-etl-bucket/raw_data/")
+df.printSchema()
+customer_df = df.select(
+    col('id'),
+    col('first_name'),
+    col('last_name'),
+    col('street_name'),
+    col('city'),
+    col('state'),
+    col('zip_code'),
+    col('country'),
+    col('job'),
+    col('email'),
+    col('phone_number')
+)
+
+customer_df.show()
+customer_df=customer_df.drop_duplicates(['id'])
+customer_df.count()
+dyf = DynamicFrame.fromDF(customer_df, glueContext, "dyf")
+folder_datetime = datetime.now().strftime("%m-%d-%Y_%H:%M:%S")
+glueContext.write_dynamic_frame.from_options(
+    frame = dyf,
+    connection_type = "s3",
+    connection_options = {
+        "path":f"s3://scd-etl-bucket/transformed_data/customer_{folder_datetime}"
+    },
+    format = "csv"
+)
+#archiving the source data after transformation
+bucket = 'scd-etl-bucket'
+source_folder = 'raw_data/'
+archive_folder = 'archive_raw_data/'
+
+s3_client = boto3.client('s3')
+object_list = s3_client.list_objects(Bucket=bucket).get('Contents')
+
+for obj in object_list:
+    obj_name = obj['Key']
+    
+    if obj_name.startswith(source_folder):
+        
+        # to get the filename
+        file_name = obj_name.split('/')[-1]
+        
+        #filepath for the destination
+        destination_path = archive_folder + file_name
+        
+        copy_source = {
+            'Bucket':bucket,
+            'Key':obj_name 
+        }
+        
+        #copy the file to archive
+        s3_client.copy_object(
+            Bucket = bucket,
+            CopySource = copy_source,
+            Key = destination_path
+        )
+        
+        #delete the file from source path
+        s3_client.delete_object(
+            Bucket=bucket,
+            Key=obj_name
+        )
+    
+
+job.commit()
